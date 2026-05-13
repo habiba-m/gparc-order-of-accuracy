@@ -22,17 +22,16 @@ We measure the empirical order of accuracy of [G-PARC](https://github.com/JackBe
 │   └── disc/
 │       └── ...            # same structure, 30 train sims
 ├── outputs/
-   ├── gaussian/
-   │   └── best_model.pth
-   └── disc/
-       └── best_model.pth
+|  ├── gaussian/
+|  │   └── best_model.pth
+|  └── disc/
+|      └── best_model.pth
 ├── figures/
-   └── convergence_1d.png
-   └── convergence_2d.png
-   └── convergence_disc.png
-   └── dataset_figure.png
-   └── results_2d.csv
-   └── results_disc.csv
+|  └── convergence_2d.png
+|  └── convergence_disc.png
+|  └── dataset_figure.png
+|  └── results_2d.csv
+|  └── results_disc.csv
 ├── numerical/
    └── convergence.py    # Computes L2 error vs mesh spacing for
    └── plot.py           # Produce all figures used in the report
