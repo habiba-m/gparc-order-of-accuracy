@@ -18,10 +18,9 @@ from typing import Callable, Optional
 import numpy as np
 
 from numerical.reference import (
-    make_grid_1d, make_grid_2d, stable_dt,
-    gaussian_2d, tophat_1d, disc_2d,
-    analytical_2d_gaussian, analytical_1d_tophat, analytical_2d_disc,
-    upwind_1d, lax_wendroff_1d,
+    make_grid_2d, stable_dt,
+    gaussian_2d, disc_2d,
+    analytical_2d_gaussian, analytical_2d_disc,
     upwind_2d, lax_wendroff_2d,
 )
 
@@ -107,44 +106,6 @@ def linf_error(pred: np.ndarray, ref: np.ndarray) -> float:
 
 
 # Study runners
-
-def run_1d_tophat_study(resolutions: list[int],
-                        c: float = 1.0,
-                        t_final: float = 0.5,
-                        predict_fn: Optional[Callable] = None,
-                        include_classical: bool = True,
-                        ) -> ConvergenceStudy:
-    """Run convergence study on the 1D tophat problem."""
-    study = ConvergenceStudy(problem="1D tophat (discontinuous)")
-    for N in resolutions:
-        x, dx = make_grid_1d(N)
-        u0 = tophat_1d(x)
-        u_exact = analytical_1d_tophat(x, t_final, c=c)
-        grid = {"x": x, "dx": dx, "c": c}
-        if include_classical:
-            dt = stable_dt(dx, c)
-            n_steps = int(np.ceil(t_final / dt)); dt = t_final / n_steps
-            t0 = time.time()
-            u_up = upwind_1d(u0, c, dx, dt, n_steps)
-            rt = (time.time() - t0) * 1000
-            study.add(ConvergenceResult("upwind", N, dx,
-                                        l2_error(u_up, u_exact, dx),
-                                        linf_error(u_up, u_exact), rt))
-            t0 = time.time()
-            u_lw = lax_wendroff_1d(u0, c, dx, dt, n_steps)
-            rt = (time.time() - t0) * 1000
-            study.add(ConvergenceResult("lax_wendroff", N, dx,
-                                        l2_error(u_lw, u_exact, dx),
-                                        linf_error(u_lw, u_exact), rt))
-        if predict_fn is not None:
-            t0 = time.time()
-            u_model = predict_fn(u0, grid, t_final)
-            rt = (time.time() - t0) * 1000
-            study.add(ConvergenceResult("g_parc", N, dx,
-                                        l2_error(u_model, u_exact, dx),
-                                        linf_error(u_model, u_exact), rt))
-    return study
-
 
 def run_2d_gaussian_study(resolutions: list[int],
                           v: tuple[float, float] = (1.0, 0.5),

@@ -26,11 +26,6 @@ def gaussian_2d(x: np.ndarray, y: np.ndarray,
     return np.exp(-((x - x0) ** 2 + (y - y0) ** 2) / (sigma ** 2))
 
 
-def tophat_1d(x: np.ndarray, a: float = -0.25, b: float = 0.25) -> np.ndarray:
-    """1D tophat (indicator) on [a, b]."""
-    return ((x >= a) & (x <= b)).astype(np.float64)
-
-
 def disc_2d(x: np.ndarray, y: np.ndarray,
             x0: float = 0.0, y0: float = 0.0,
             R: float = 0.3) -> np.ndarray:
@@ -54,16 +49,6 @@ def analytical_2d_gaussian(x: np.ndarray, y: np.ndarray, t: float,
     return np.exp(-(dx ** 2 + dy ** 2) / sigma ** 2)
 
 
-def analytical_1d_tophat(x: np.ndarray, t: float,
-                        c: float = 1.0,
-                        a: float = -0.25, b: float = 0.25,
-                        domain: tuple[float, float] = (-1.0, 1.0)) -> np.ndarray:
-    """Analytical solution at time t for 1D advected tophat on periodic domain."""
-    L = domain[1] - domain[0]
-    xs = (x - c * t - domain[0]) % L + domain[0]
-    return ((xs >= a) & (xs <= b)).astype(np.float64)
-
-
 def analytical_2d_disc(x: np.ndarray, y: np.ndarray, t: float,
                        v: tuple[float, float] = (1.0, 0.5),
                        x0: float = 0.0, y0: float = 0.0,
@@ -76,31 +61,6 @@ def analytical_2d_disc(x: np.ndarray, y: np.ndarray, t: float,
     dx = (x - xc + L / 2) % L - L / 2
     dy = (y - yc + L / 2) % L - L / 2
     return (dx ** 2 + dy ** 2 <= R ** 2).astype(np.float64)
-
-
-# Classical baselines (1D)
-
-def upwind_1d(u0: np.ndarray, c: float, dx: float, dt: float, n_steps: int) -> np.ndarray:
-    """First-order upwind for u_t + c u_x = 0 on a periodic 1D grid."""
-    u = u0.copy()
-    if c >= 0:
-        for _ in range(n_steps):
-            u = u - c * dt / dx * (u - np.roll(u, 1))
-    else:
-        for _ in range(n_steps):
-            u = u - c * dt / dx * (np.roll(u, -1) - u)
-    return u
-
-
-def lax_wendroff_1d(u0: np.ndarray, c: float, dx: float, dt: float, n_steps: int) -> np.ndarray:
-    """Lax-Wendroff for u_t + c u_x = 0 on a periodic 1D grid."""
-    u = u0.copy()
-    nu = c * dt / dx
-    for _ in range(n_steps):
-        up = np.roll(u, -1)
-        um = np.roll(u, 1)
-        u = u - 0.5 * nu * (up - um) + 0.5 * nu ** 2 * (up - 2 * u + um)
-    return u
 
 
 # Classical baselines (2D)
