@@ -1,27 +1,26 @@
 """
-Convergence study runner 
+Convergence study runner
 
 Computes L2 error vs mesh spacing for:
--  G-PARC model
+- G-PARC model
 - First-order upwind baseline
 - Lax-Wendroff baseline
 
 Then fits the slope log(e) ~ p * log(h) to recover the empirical order
 of accuracy p.
-
-This isolates the model details from the convergence analysis.
 """
 
 from __future__ import annotations
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Optional
 import numpy as np
 
 from numerical.reference import (
     make_grid_1d, make_grid_2d, stable_dt,
-    gaussian_2d, tophat_1d,
-    analytical_2d_gaussian, analytical_1d_tophat,
+    gaussian_2d, tophat_1d, disc_2d,
+    analytical_2d_gaussian, analytical_1d_tophat, analytical_2d_disc,
     upwind_1d, lax_wendroff_1d,
     upwind_2d, lax_wendroff_2d,
 )
@@ -60,14 +59,12 @@ class ConvergenceStudy:
             return {"slope": np.nan, "intercept": np.nan, "r2": np.nan, "n": len(rs)}
         h = np.array([r.h for r in rs])
         e = np.array([r.l2_error for r in rs])
-        # guard against zero error
         valid = e > 0
         if valid.sum() < 2:
             return {"slope": np.nan, "intercept": np.nan, "r2": np.nan, "n": int(valid.sum())}
         lh = np.log(h[valid])
         le = np.log(e[valid])
         slope, intercept = np.polyfit(lh, le, 1)
-        # R^2
         pred = slope * lh + intercept
         ss_res = np.sum((le - pred) ** 2)
         ss_tot = np.sum((le - le.mean()) ** 2)
@@ -93,13 +90,12 @@ class ConvergenceStudy:
             rs.sort(key=lambda r: -r.N)
             for r in rs:
                 print(f"  {r.N:>6} {r.h:>10.5f} {r.l2_error:>14.4e} "
-                    f"{r.linf_error:>14.4e} {r.runtime_ms:>10.1f}")
+                      f"{r.linf_error:>14.4e} {r.runtime_ms:>10.1f}")
             fit = self.fit_order(m)
             print(f"  --> fitted order p = {fit['slope']:.3f}  (R^2 = {fit['r2']:.4f})")
 
 
-
-# Error metric -- going to use l2 error for fitting, but also report linf for reference
+# Error metrics
 
 def l2_error(pred: np.ndarray, ref: np.ndarray, cell_volume: float) -> float:
     """Discrete L2 norm: sqrt(sum (pred - ref)^2 * dV)."""
@@ -111,27 +107,21 @@ def linf_error(pred: np.ndarray, ref: np.ndarray) -> float:
 
 
 # Study runners
+
 def run_1d_tophat_study(resolutions: list[int],
                         c: float = 1.0,
                         t_final: float = 0.5,
                         predict_fn: Optional[Callable] = None,
-                        include_classical: bool = True
+                        include_classical: bool = True,
                         ) -> ConvergenceStudy:
-    """Run convergence study on the 1D tophat problem.
-
-    predict_fn: callable taking (u0, {'x': x, 'dx': dx, 'c': c}, t_final).
-                If None, only the classical baselines are evaluated.
-    """
+    """Run convergence study on the 1D tophat problem."""
     study = ConvergenceStudy(problem="1D tophat (discontinuous)")
-
     for N in resolutions:
         x, dx = make_grid_1d(N)
         u0 = tophat_1d(x)
         u_exact = analytical_1d_tophat(x, t_final, c=c)
         grid = {"x": x, "dx": dx, "c": c}
-
         if include_classical:
-            # Upwind
             dt = stable_dt(dx, c)
             n_steps = int(np.ceil(t_final / dt)); dt = t_final / n_steps
             t0 = time.time()
@@ -140,14 +130,12 @@ def run_1d_tophat_study(resolutions: list[int],
             study.add(ConvergenceResult("upwind", N, dx,
                                         l2_error(u_up, u_exact, dx),
                                         linf_error(u_up, u_exact), rt))
-            # Lax-Wendroff
             t0 = time.time()
             u_lw = lax_wendroff_1d(u0, c, dx, dt, n_steps)
             rt = (time.time() - t0) * 1000
             study.add(ConvergenceResult("lax_wendroff", N, dx,
                                         l2_error(u_lw, u_exact, dx),
                                         linf_error(u_lw, u_exact), rt))
-
         if predict_fn is not None:
             t0 = time.time()
             u_model = predict_fn(u0, grid, t_final)
@@ -155,27 +143,27 @@ def run_1d_tophat_study(resolutions: list[int],
             study.add(ConvergenceResult("g_parc", N, dx,
                                         l2_error(u_model, u_exact, dx),
                                         linf_error(u_model, u_exact), rt))
-
     return study
 
 
 def run_2d_gaussian_study(resolutions: list[int],
-                        v: tuple[float, float] = (1.0, 0.5),
-                        sigma: float = 0.15,
-                        t_final: float = 0.5,
-                        predict_fn: Optional[Callable] = None,
-                        include_classical: bool = True
-                        ) -> ConvergenceStudy:
+                          v: tuple[float, float] = (1.0, 0.5),
+                          sigma: float = 0.5,
+                          x0: float = np.pi, y0: float = np.pi,
+                          t_final: float = 2.0,
+                          domain: tuple[float, float] = (0.0, 2 * np.pi),
+                          predict_fn: Optional[Callable] = None,
+                          include_classical: bool = True,
+                          ) -> ConvergenceStudy:
     """Run convergence study on the 2D Gaussian advection problem."""
     study = ConvergenceStudy(problem="2D Gaussian (smooth)")
-
     for N in resolutions:
-        X, Y, dx, dy = make_grid_2d(N)
-        u0 = gaussian_2d(X, Y, sigma=sigma)
-        u_exact = analytical_2d_gaussian(X, Y, t_final, v=v, sigma=sigma)
+        X, Y, dx, dy = make_grid_2d(N, domain)
+        u0 = gaussian_2d(X, Y, x0=x0, y0=y0, sigma=sigma)
+        u_exact = analytical_2d_gaussian(X, Y, t_final, v=v, x0=x0, y0=y0,
+                                         sigma=sigma, domain=domain)
         cell_vol = dx * dy
-        grid = {"X": X, "Y": Y, "dx": dx, "dy": dy, "v": v}
-
+        grid = {"X": X, "Y": Y, "dx": dx, "dy": dy, "v": v, "domain": domain}
         if include_classical:
             dt = stable_dt(min(dx, dy), max(abs(v[0]), abs(v[1])))
             n_steps = int(np.ceil(t_final / dt)); dt = t_final / n_steps
@@ -191,7 +179,6 @@ def run_2d_gaussian_study(resolutions: list[int],
             study.add(ConvergenceResult("lax_wendroff", N, dx,
                                         l2_error(u_lw, u_exact, cell_vol),
                                         linf_error(u_lw, u_exact), rt))
-
         if predict_fn is not None:
             t0 = time.time()
             u_model = predict_fn(u0, grid, t_final)
@@ -199,36 +186,70 @@ def run_2d_gaussian_study(resolutions: list[int],
             study.add(ConvergenceResult("g_parc", N, dx,
                                         l2_error(u_model, u_exact, cell_vol),
                                         linf_error(u_model, u_exact), rt))
+    return study
 
+
+def run_2d_disc_study(resolutions: list[int],
+                      v: tuple[float, float] = (1.0, 0.5),
+                      R: float = 0.6,
+                      x0: float = np.pi, y0: float = np.pi,
+                      t_final: float = 2.0,
+                      domain: tuple[float, float] = (0.0, 2 * np.pi),
+                      predict_fn: Optional[Callable] = None,
+                      include_classical: bool = True,
+                      ) -> ConvergenceStudy:
+    """Run convergence study on the 2D disc (non-smooth) advection problem."""
+    study = ConvergenceStudy(problem="2D disc (non-smooth)")
+    for N in resolutions:
+        X, Y, dx, dy = make_grid_2d(N, domain)
+        u0 = disc_2d(X, Y, x0, y0, R)
+        u_exact = analytical_2d_disc(X, Y, t_final, v=v, x0=x0, y0=y0, R=R, domain=domain)
+        cell_vol = dx * dy
+        grid = {"X": X, "Y": Y, "dx": dx, "dy": dy, "v": v, "domain": domain}
+        if include_classical:
+            dt = stable_dt(min(dx, dy), max(abs(v[0]), abs(v[1])))
+            n_steps = int(np.ceil(t_final / dt)); dt = t_final / n_steps
+            t0 = time.time()
+            u_up = upwind_2d(u0, v, dx, dy, dt, n_steps)
+            rt = (time.time() - t0) * 1000
+            study.add(ConvergenceResult("upwind", N, dx,
+                                        l2_error(u_up, u_exact, cell_vol),
+                                        linf_error(u_up, u_exact), rt))
+            t0 = time.time()
+            u_lw = lax_wendroff_2d(u0, v, dx, dy, dt, n_steps)
+            rt = (time.time() - t0) * 1000
+            study.add(ConvergenceResult("lax_wendroff", N, dx,
+                                        l2_error(u_lw, u_exact, cell_vol),
+                                        linf_error(u_lw, u_exact), rt))
+        if predict_fn is not None:
+            t0 = time.time()
+            u_model = predict_fn(u0, grid, t_final)
+            rt = (time.time() - t0) * 1000
+            study.add(ConvergenceResult("g_parc", N, dx,
+                                        l2_error(u_model, u_exact, cell_vol),
+                                        linf_error(u_model, u_exact), rt))
     return study
 
 
 # CLI
 
 def main():
-    """Run the classical baselines as a self-test. Plug in G-PARC by editing
-    the `predict_fn` import below and adjusting the wrapper module."""
-    # ---- Replace this with your model wrapper ----
-    predict_fn_2d = None
-    predict_fn_1d = None
-    # Example:
-    # from gparc_wrapper import make_predict_fn_2d, make_predict_fn_1d
-    # predict_fn_2d = make_predict_fn_2d("checkpoints/gparc_2d.pt")
-    # predict_fn_1d = make_predict_fn_1d("checkpoints/gparc_1d.pt")
+    """Run classical baselines for both 2D problems. Run from repo root:
+        python -m numerical.convergence
+    """
+    script_dir = Path(__file__).parent
+    out = (script_dir / ".." / "figures").resolve()
+    out.mkdir(exist_ok=True)
 
-    study_2d = run_2d_gaussian_study(
-        resolutions=[128, 96, 64, 48, 32],
-        predict_fn=predict_fn_2d,
-    )
-    study_2d.print_table()
-    study_2d.to_csv("../figures/results_2d.csv")
+    resolutions = [256, 128, 64, 32, 16]
 
-    study_1d = run_1d_tophat_study(
-        resolutions=[512, 256, 128, 64, 32],
-        predict_fn=predict_fn_1d,
-    )
-    study_1d.print_table()
-    study_1d.to_csv("../figures/results_1d.csv")
+    study_gauss = run_2d_gaussian_study(resolutions=resolutions)
+    study_gauss.print_table()
+    study_gauss.to_csv(str(out / "results_2d.csv"))
+
+    study_disc = run_2d_disc_study(resolutions=resolutions)
+    study_disc.print_table()
+    study_disc.to_csv(str(out / "results_disc.csv"))
 
 
 if __name__ == "__main__":

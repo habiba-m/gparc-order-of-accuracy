@@ -5,10 +5,14 @@ Run this after convergence.py has produced results_2d.csv and results_1d.csv.
 
 from __future__ import annotations
 import csv
+import sys
 from collections import defaultdict
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
+
+# Allow imports from the repo root regardless of working directory
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 METHOD_STYLES = {
@@ -73,36 +77,51 @@ def plot_convergence(csv_path: str, out_path: str, title: str):
     print(f"  saved {out_path}")
 
 
-def plot_qualitative_2d(out_path: str):
-    """A simple dataset / behavior visualization. Pure illustration; doesn't
-    need the trained model. Shows initial, midpoint, and final analytical state
-    plus what upwind does to it (visualizing dissipation)."""
-    from numerical.reference import make_grid_2d, gaussian_2d, analytical_2d_gaussian, upwind_2d, stable_dt
-
+def plot_dataset_figure(out_path: str):
+    """Dataset visualization for the report.
+    Top row: smooth Gaussian IC at three timesteps (analytical).
+    Bottom row: non-smooth disc IC at three timesteps (analytical).
+    Domain [0, 2pi)^2, v = (1.0, 0.5).
+    """
+    L = 2.0 * np.pi
+    VX, VY = 1.0, 0.5
     N = 64
-    X, Y, dx, dy = make_grid_2d(N)
-    v = (1.0, 0.5); sigma = 0.15
-    u0 = gaussian_2d(X, Y, sigma=sigma)
-    times = [0.0, 0.25, 0.5]
-    dt = stable_dt(min(dx, dy), max(abs(v[0]), abs(v[1])))
+    x1d = np.linspace(0, L, N, endpoint=False)
+    X, Y = np.meshgrid(x1d, x1d, indexing="ij")
+    x0, y0 = np.pi, np.pi
 
-    fig, axes = plt.subplots(2, 3, figsize=(10, 6.5))
-    for j, t in enumerate(times):
-        ex = analytical_2d_gaussian(X, Y, t, v=v, sigma=sigma)
-        axes[0, j].imshow(ex, origin="lower", extent=[-1, 1, -1, 1], cmap="viridis", vmin=0, vmax=1)
-        axes[0, j].set_title(f"Analytical, t={t}")
+    def gauss(t, sigma=0.5):
+        xc = (x0 + VX * t) % L;  yc = (y0 + VY * t) % L
+        dx = X - xc;  dx -= L * np.round(dx / L)
+        dy = Y - yc;  dy -= L * np.round(dy / L)
+        return np.exp(-(dx**2 + dy**2) / sigma**2)
 
-        if t == 0.0:
-            axes[1, j].imshow(u0, origin="lower", extent=[-1, 1, -1, 1], cmap="viridis", vmin=0, vmax=1)
-        else:
-            n_steps = int(np.ceil(t / dt)); dtj = t / n_steps
-            u_up = upwind_2d(u0, v, dx, dy, dtj, n_steps)
-            axes[1, j].imshow(u_up, origin="lower", extent=[-1, 1, -1, 1], cmap="viridis", vmin=0, vmax=1)
-        axes[1, j].set_title(f"Upwind, t={t}")
+    def disc(t, R=0.6):
+        xc = (x0 + VX * t) % L;  yc = (y0 + VY * t) % L
+        dx = X - xc;  dx -= L * np.round(dx / L)
+        dy = Y - yc;  dy -= L * np.round(dy / L)
+        return (dx**2 + dy**2 <= R**2).astype(float)
+
+    times = [0.0, 1.0, 2.0]
+    labels = ["$t = 0$", "$t = 1$", "$t = 2$"]
+
+    fig, axes = plt.subplots(2, 3, figsize=(9, 6))
+    extent = [0, L, 0, L]
+
+    for j, (t, lbl) in enumerate(zip(times, labels)):
+        axes[0, j].imshow(gauss(t).T, origin="lower", extent=extent,
+                        cmap="viridis", vmin=0, vmax=1)
+        axes[1, j].imshow(disc(t).T, origin="lower", extent=extent,
+                        cmap="viridis", vmin=0, vmax=1)
+        axes[0, j].set_title(lbl, fontsize=11)
+
+    axes[0, 0].set_ylabel("Gaussian (smooth)", fontsize=10)
+    axes[1, 0].set_ylabel("Disc (non-smooth)", fontsize=10)
 
     for ax in axes.flat:
         ax.set_xticks([]); ax.set_yticks([])
-    fig.suptitle("2D Gaussian advection: analytical vs first-order upwind (showing dissipation)")
+
+    fig.suptitle(r"Advection on $[0,2\pi)^2$, $\mathbf{v}=(1.0,\,0.5)$", fontsize=12)
     fig.tight_layout()
     fig.savefig(out_path, dpi=200)
     plt.close(fig)
@@ -136,17 +155,28 @@ def plot_qualitative_1d(out_path: str):
 
 
 def main():
-    out = Path("../figures")
+    # Resolve figures/ relative to this script so the script can be run from
+    # either the repo root or the numerical/ subdirectory.
+    script_dir = Path(__file__).parent
+    out = (script_dir / ".." / "figures").resolve()
     out.mkdir(exist_ok=True)
     print("Generating figures...")
-    if Path("results_2d.csv").exists():
-        plot_convergence("results_2d.csv", str(out / "convergence_2d.png"),
+
+    csv_2d   = out / "results_2d.csv"
+    csv_disc = out / "results_disc.csv"
+    csv_1d   = out / "results_1d.csv"
+
+    if csv_2d.exists():
+        plot_convergence(str(csv_2d), str(out / "convergence_2d.png"),
                         "Order of accuracy: 2D Gaussian (smooth)")
-    if Path("results_1d.csv").exists():
-        plot_convergence("results_1d.csv", str(out / "convergence_1d.png"),
+    if csv_disc.exists():
+        plot_convergence(str(csv_disc), str(out / "convergence_disc.png"),
+                        "Order of accuracy: 2D disc (non-smooth)")
+    if csv_1d.exists():
+        plot_convergence(str(csv_1d), str(out / "convergence_1d.png"),
                         "Order of accuracy: 1D tophat (discontinuous)")
-    plot_qualitative_2d(str(out / "qualitative_2d.png"))
-    plot_qualitative_1d(str(out / "qualitative_1d.png"))
+
+    plot_dataset_figure(str(out / "dataset_figure.png"))
     print("Done.")
 
 
